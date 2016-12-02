@@ -41,7 +41,38 @@
  * building.get_num_floors()
  */
 
+// create custom array function that used to select all elements that have greater value than at_floor parameter
+Array.prototype.greater = function (at_floor) {
+    var result = this.filter(function (value) {
+        return value >= at_floor;
+    });
+    return result;
+}
+
+// create custom array function that used to select all elements that have smaller value than at_floor parameter
+Array.prototype.smaller = function (at_floor) {
+    var result = this.filter(function (value) {
+        return value <= at_floor;
+    });
+    return result;
+}
+
 Elevator.prototype.decide = function() {
+    /* 
+    since javascript sort method will sort alphabetically 
+    ex : [1, 5, 10, 100] will become [1, 10, 100, 5]
+
+    then we need to define our custom sort function
+    so the sort can sort number properly
+    */
+    function ascending(a, b) {
+        return a - b;
+    }
+
+    function descending(a, b) {
+        return b - a;
+    }
+
     var simulator = Simulator.get_instance();
     var building = simulator.get_building();
     var num_floors = building.get_num_floors();
@@ -51,7 +82,6 @@ Elevator.prototype.decide = function() {
     
     var elevator = this;
     var people = this.get_people();
-    var person = people.length > 0 ? people[0] : undefined;
     
     if(elevator) {
         elevator.at_floor();
@@ -59,10 +89,28 @@ Elevator.prototype.decide = function() {
         elevator.get_position();
     }
     
-    if(person) {
-        person.get_floor();
-        return this.commit_decision(person.get_destination_floor());
+    /*
+    we dont know the destination of people that requested the lift (yes we know they stay at what floor but we dont know their destination floor until we pick them up) then we will move the elevator one direction only
+
+    I mean by one direction only is that the elevator will go up to the highest floor that has requested for elevator and then after that the elevator will go down to the lowest floor that requested for elevator (vice versa if the elevator move to lowest floor first)
+    */
+    var direction = this.direction;
+
+    /* 
+    requests from all floor and people destination floor in elevator that at the end will be sorted according elevator direction
+    */
+    var all_requests = [];
+
+    // if there are people in the elevator then push their destination floors first to all_requests
+    for (var i = 0; i < people.length; i++) {
+        all_requests.push(people[i].get_destination_floor());
     }
+
+    /*
+    because at_floor() function will return undefined if the elevator is moving 
+    so we need to search manually the current position of the elevator
+    */
+    var at_floor = (this.get_position() / this.get_height()) + 1;
     
     for(var i = 0;i < requests.length;i++) {
         var handled = false;
@@ -73,9 +121,57 @@ Elevator.prototype.decide = function() {
             }
         }
         if(!handled) {
-            return this.commit_decision(requests[i]);
+            all_requests.push(requests[i]);
         }
     }
 
-    return this.commit_decision(Math.floor(num_floors / 2));
+    var destination_floor;
+    // first time movement after idle
+    if (!this.direction) {
+        // search requests from both direction
+        var upper_floor = all_requests.greater(at_floor);
+        var lower_floor = all_requests.smaller(at_floor);
+
+        // set destination_floor = upper_floor if upper_floor is same or bigger than lower_floor else set lower_floor
+        destination_floor = upper_floor >= lower_floor ? upper_floor : lower_floor;
+        // set direction = up if upper_floor is same or bigger than lower_floor else set upper_floor
+        this.direction = upper_floor >= lower_floor ? Elevator.DIRECTION_UP : Elevator.DIRECTION_DOWN;
+    } else {
+        switch (this.direction) {
+            case Elevator.DIRECTION_UP:
+                // search requests from upper floor
+                destination_floor = all_requests.greater(at_floor);
+
+                // if there are no requests from upper floor
+                // then search requests from lower floor
+                if (destination_floor.length == 0) {
+                    destination_floor = all_requests.smaller(at_floor);
+                    // set direction to go down
+                    this.direction = Elevator.DIRECTION_DOWN;
+                }
+            break;
+
+            case Elevator.DIRECTION_DOWN:
+                // search requests from lower floor
+                destination_floor = all_requests.smaller(at_floor);
+
+                // if there are no requests from lower floor
+                // then search requests from upper floor
+                if (destination_floor.length == 0) {
+                    destination_floor = all_requests.greater(at_floor);
+                    // set direction to go up
+                    this.direction = Elevator.DIRECTION_UP;
+                }
+            break;
+        }
+    }
+
+    if (destination_floor.length > 0) {
+        // sort destination_floor based on direction
+        var sort = this.direction == Elevator.DIRECTION_DOWN ? descending : ascending;
+        destination_floor.sort(sort);
+
+        // finally tell the elevator where to go
+        return this.commit_decision(destination_floor[0]);
+    }
 };
